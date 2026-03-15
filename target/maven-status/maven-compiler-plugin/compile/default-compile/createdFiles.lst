@@ -1,0 +1,12 @@
+com/example/hoconeditor/model/FlowProcess.class
+com/example/hoconeditor/model/FlowProcess$Output.class
+com/example/hoconeditor/model/HoconFile.class
+com/example/hoconeditor/HoconEditorApplication.class
+com/example/hoconeditor/model/FlowProcess$Variable.class
+com/example/hoconeditor/model/StepTypeDescriptor.class
+com/example/hoconeditor/controller/EditorController.class
+com/example/hoconeditor/service/StepTypeRegistry.class
+com/example/hoconeditor/model/FieldDescriptor.class
+com/example/hoconeditor/controller/ApiController.class
+com/example/hoconeditor/model/FlowProcess$Step.class
+com/example/hoconeditor/service/HoconFileService.class
