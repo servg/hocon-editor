@@ -192,6 +192,23 @@ const HoconParser = (function() {
             connection: getVal(structure.values.connection, ""),
             maxRetries: toNumber(getVal(structure.values["max-retries"], "0")),
             retryDelayMs: toNumber(getVal(structure.values["retry-delay-ms"], "0")),
+            exception: (function() {
+                var def = { type: 'break', userForm: ['break', 'next'], gotoStep: '' };
+                if (!structure.blocks || !structure.blocks['exception']) return def;
+                var eb = parseObjectAssignments(structure.blocks['exception']);
+                var t = getVal(eb.values['type'], 'break');
+                var uf = eb.values['user-form']
+                    ? (eb.values['user-form'].raw || '').replace(/[\[\]\s]/g, '').split(',').filter(Boolean)
+                    : ['break', 'next'];
+                var gs = '';
+                if (eb.blocks && eb.blocks['output']) {
+                    var outb = parseObjectAssignments(eb.blocks['output']);
+                    gs = getVal(outb.values['to'], '');
+                } else {
+                    gs = getVal(eb.values['goto'], '');
+                }
+                return { type: t, userForm: uf, gotoStep: gs };
+            })(),
             config: Object.fromEntries(Object.entries(configBlock.values).map(function(e) { return [e[0], e[1].value]; })),
             outputs: outputs
         };

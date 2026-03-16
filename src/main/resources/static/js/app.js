@@ -92,6 +92,20 @@ $(function() {
         });
     });
 
+    $('#new-flow-btn').on('click', function() {
+        if (state.processDraft.steps.length > 0 && !confirm('Создать новый флоу? Текущий черновик будет потерян.')) return;
+        var startStep = normalizeStep({ id: 'start', name: 'Start', type: 'START', config: {}, outputs: [{ to: 'end', condition: '', order: 0 }] });
+        var endStep   = normalizeStep({ id: 'end',   name: 'End',   type: 'END',   config: {}, outputs: [] });
+        startStep.uiLevel = 0;
+        // endStep.uiLevel intentionally not set — flow-renderer forces END to maxLevel+1
+        state.processDraft = { variables: [], steps: [startStep, endStep], selectedStepId: 'start' };
+        state.sourceEditorDraft = '';
+        state.parserState = 'Idle';
+        setMessage('Новый флоу создан: START → END.', 'success');
+        autoConnectHangingOutputs(state.processDraft.steps);
+        renderAll();
+    });
+
     $('#reset-btn').on('click', function() {
         if (!confirm('Сбросить все данные?')) return;
         state.processDraft = { variables: [], steps: [], selectedStepId: null };
@@ -130,6 +144,21 @@ $(function() {
     // Step modal save
     $('#save-step-btn').on('click', saveStepEditorDraft);
 
+    // Step modal delete / duplicate (delegated since buttons rendered dynamically)
+    stepModalEl.addEventListener('click', function(e) {
+        if (e.target.id === 'delete-step-modal-btn') {
+            var id = state.stepEditorDraft && state.stepEditorDraft.originalId;
+            if (!id) return;
+            stepModal.hide();
+            deleteStep(id);
+        } else if (e.target.id === 'duplicate-step-modal-btn') {
+            var id2 = state.stepEditorDraft && state.stepEditorDraft.originalId;
+            if (!id2) return;
+            stepModal.hide();
+            duplicateStep(id2);
+        }
+    });
+
     // Flow map clicks
     $flowMapColumns.on('click', '[data-action]', function() {
         var action = $(this).data('action');
@@ -144,10 +173,6 @@ $(function() {
     });
     $flowMapColumns.on('click', '[data-flow-node]', function(e) {
         if ($(e.target).closest('[data-action]').length) return;
-        var sid = $(this).data('step-id');
-        if (sid) selectStep(sid);
-    });
-    $flowMapColumns.on('dblclick', '[data-flow-node]', function() {
         var sid = $(this).data('step-id');
         if (sid) openStepEditor(sid);
     });
@@ -206,6 +231,7 @@ $(function() {
                 steps: (parsed.steps || []).map(normalizeStep),
                 selectedStepId: parsed.steps.length ? parsed.steps[0].id : null
             };
+            ensureStartEnd(state.processDraft.steps);
             renderAll();
             setMessage(opts.successMessage, 'success');
             setSourceMsg(opts.successMessage, 'success');
@@ -291,8 +317,22 @@ $(function() {
 
     // ── Step editing ───────────────────────────────────────────────────
 
+    function ensureStartEnd(steps) {
+        var hasStart = steps.some(function(s) { return s.type === 'START'; });
+        var hasEnd   = steps.some(function(s) { return s.type === 'END'; });
+        if (!hasStart) {
+            var startId = FlowRenderer.getStepById(steps, 'start') ? 'start_node' : 'start';
+            steps.unshift(normalizeStep({ id: startId, name: 'Start', type: 'START', config: {}, outputs: [] }));
+        }
+        if (!hasEnd) {
+            var endId = FlowRenderer.getStepById(steps, 'end') ? 'end_node' : 'end';
+            steps.push(normalizeStep({ id: endId, name: 'End', type: 'END', config: {}, outputs: [] }));
+        }
+    }
+
     function normalizeStep(step) {
         var lvl = step.uiLevel;
+        var ex = step.exception;
         return {
             id: String(step.id || '').trim(),
             name: String(step.name || '').trim(),
@@ -301,6 +341,9 @@ $(function() {
             maxRetries: Math.max(0, Number(step.maxRetries) || 0),
             retryDelayMs: Math.max(0, Number(step.retryDelayMs) || 0),
             uiLevel: (lvl != null && Number.isFinite(Number(lvl))) ? Math.max(0, Math.round(Number(lvl))) : null,
+            exception: ex
+                ? { type: ex.type || 'break', userForm: Array.isArray(ex.userForm) ? ex.userForm : ['break', 'next'], gotoStep: ex.gotoStep || '' }
+                : { type: 'break', userForm: ['break', 'next'], gotoStep: '' },
             config: Object.fromEntries(
                 Object.entries(step.config || {})
                     .map(function(e) { return [String(e[0]).trim(), String(e[1] == null ? '' : e[1])]; })
@@ -422,10 +465,23 @@ $(function() {
             var toId = $stepEditorBody.find('#output-rows-body tr').eq(idx).find('.output-to').val().trim();
             if (!toId || FlowRenderer.getStepById(state.processDraft.steps, toId)) return;
             var parentLvl = state.stepEditorDraft && state.stepEditorDraft.step.uiLevel != null ? state.stepEditorDraft.step.uiLevel : null;
-            state.processDraft.steps.push(normalizeStep({ id: toId, name: toId, type: 'EMPTY', config: {}, outputs: [], uiLevel: parentLvl != null ? parentLvl + 1 : null }));
+            var endStepForEmpty = state.processDraft.steps.find(function(s) { return s.type === 'END'; });
+            var newEmptyOutputs = endStepForEmpty ? [{ to: endStepForEmpty.id, condition: '', order: 0 }] : [];
+            state.processDraft.steps.push(normalizeStep({ id: toId, name: toId, type: 'EMPTY', config: {}, outputs: newEmptyOutputs, uiLevel: parentLvl != null ? parentLvl + 1 : null }));
             setMessage("Шаг '" + toId + "' создан как EMPTY.", 'success');
             renderAll();
             renderStepEditor();
+        });
+    }
+
+    function autoConnectHangingOutputs(steps) {
+        var endStep = steps.find(function(s) { return s.type === 'END'; });
+        if (!endStep) return;
+        steps.forEach(function(s) {
+            if (s.type === 'END') return;
+            if (!s.outputs || s.outputs.length === 0) {
+                s.outputs = [{ to: endStep.id, condition: '', order: 0 }];
+            }
         });
     }
 
@@ -439,6 +495,7 @@ $(function() {
             connection: draft.step.connection,
             maxRetries: draft.step.maxRetries, retryDelayMs: draft.step.retryDelayMs,
             uiLevel: draft.step.uiLevel,
+            exception: draft.step.exception,
             config: Object.fromEntries(draft.configRows.filter(function(r) { return r.key.trim(); }).map(function(r) { return [r.key.trim(), r.value]; })),
             outputs: draft.outputRows.map(function(r, i) { return { to: r.to.trim(), condition: r.condition.trim(), order: i }; }).filter(function(o) { return o.to; })
         });
@@ -451,6 +508,17 @@ $(function() {
                 }
             }
         });
+
+        // Singleton guard for START/END
+        if (nextStep.type === 'START' || nextStep.type === 'END') {
+            var alreadyExists = state.processDraft.steps.some(function(s) {
+                return s.type === nextStep.type && s.id !== draft.originalId;
+            });
+            if (alreadyExists) {
+                setStepMsg('Шаг типа ' + nextStep.type + ' уже существует. Допустим только один.', 'danger');
+                return;
+            }
+        }
 
         // Validate
         if (!nextStep.id) { setStepMsg('Step ID обязателен.', 'danger'); return; }
@@ -477,6 +545,9 @@ $(function() {
             }
         }
 
+        // Auto-connect all steps without outputs to END
+        autoConnectHangingOutputs(state.processDraft.steps);
+
         state.processDraft.selectedStepId = nextStep.id;
         setMessage("Шаг '" + nextStep.id + "' сохранен.", 'success');
         renderAll();
@@ -501,6 +572,10 @@ $(function() {
     function duplicateStep(stepId) {
         var step = FlowRenderer.getStepById(state.processDraft.steps, stepId);
         if (!step) return;
+        if (step.type === 'START' || step.type === 'END') {
+            setMessage("Шаг типа " + step.type + " нельзя дублировать.", 'warning');
+            return;
+        }
         var copy = JSON.parse(JSON.stringify(step));
         copy.id = generateStepId(step.id + '_copy');
         copy.name = (copy.name || copy.id) + ' Copy';
@@ -511,6 +586,11 @@ $(function() {
     }
 
     function deleteStep(stepId) {
+        var stepToDelete = FlowRenderer.getStepById(state.processDraft.steps, stepId);
+        if (stepToDelete && (stepToDelete.type === 'START' || stepToDelete.type === 'END')) {
+            setMessage("Шаг типа " + stepToDelete.type + " нельзя удалить.", 'danger');
+            return;
+        }
         if (!confirm("Удалить шаг '" + stepId + "'?")) return;
         state.processDraft.steps = state.processDraft.steps.filter(function(s) { return s.id !== stepId; });
         state.processDraft.steps.forEach(function(s) {

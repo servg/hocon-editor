@@ -8,7 +8,7 @@
     --sf-accent: #0f766e;
     --sf-accent-soft: #dff6ef;
     --sf-branch: #0b7285;
-    --sf-fallback: #94a3b8;
+    --sf-fallback: #198754;
     --sf-warning: #b54708;
     --sf-warning-soft: #fff2e2;
     --sf-danger: #b42318;
@@ -109,20 +109,23 @@ body {
     align-items: stretch; gap: 1.1rem; min-width: 100%;
 }
 .flow-column {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 320px));
+    display: flex; flex-wrap: wrap; justify-content: center; align-items: start;
     gap: 0.9rem; min-height: 0; padding: 0.9rem;
     border-radius: var(--sf-radius-sm);
     border: 1px dashed rgba(100,116,139,0.28); background: rgba(255,255,255,0.58);
 }
-.flow-column-header { grid-column: 1 / -1; padding-bottom: 0.4rem; border-bottom: 1px solid rgba(216,225,238,0.9); }
-.flow-column-header strong { display: block; font-size: 0.92rem; color: var(--sf-text); }
+.flow-column .flow-node { width: 260px; max-width: 320px; flex: 0 0 auto; }
+.flow-column-singleton { grid-template-columns: 1fr; }
+.flow-column-singleton .flow-node { max-width: 100%; }
+.flow-column-header { width: 100%; padding-bottom: 0.4rem; border-bottom: 1px solid rgba(216,225,238,0.9); display: flex; align-items: baseline; gap: 0.5rem; }
+.flow-column-header strong { display: inline; font-size: 0.92rem; color: var(--sf-text); }
 .flow-column-header span { font-size: 0.85rem; color: var(--sf-muted); }
 
 .flow-node {
     border: 1px solid var(--sf-border); border-radius: 18px;
     background: linear-gradient(180deg, #ffffff 0%, #f7fafc 100%);
     box-shadow: 0 12px 26px rgba(18,31,47,0.08);
-    padding: 0.95rem; cursor: pointer;
+    padding: 0.6rem 0.75rem; cursor: pointer;
     transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
 }
 .flow-node:hover { transform: translateY(-1px); box-shadow: 0 16px 28px rgba(18,31,47,0.1); }
@@ -131,9 +134,9 @@ body {
 .flow-node.end { border-color: rgba(180,83,9,0.36); background: linear-gradient(180deg, #ffffff 0%, rgba(255,247,237,0.96) 100%); }
 .flow-node.missing { border-color: rgba(181,71,8,0.45); background: linear-gradient(180deg, #ffffff 0%, var(--sf-warning-soft) 100%); }
 
-.flow-node-title { display: flex; justify-content: space-between; align-items: start; gap: 0.75rem; margin-bottom: 0.55rem; }
-.flow-node-title strong { display: block; line-height: 1.25; }
-.flow-node-title code { display: inline-block; margin-top: 0.25rem; color: var(--sf-muted); font-size: 0.8rem; }
+.flow-node-title { display: flex; justify-content: space-between; align-items: start; gap: 0.75rem; margin-bottom: 0.3rem; }
+.flow-node-title strong { display: block; line-height: 1.25; font-size: 0.9rem; }
+.flow-node-title code { display: inline-block; margin-top: 0.2rem; color: var(--sf-muted); font-size: 0.75rem; }
 
 .node-meta { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.6rem; }
 .node-meta .badge { border-radius: 999px; }
@@ -159,9 +162,9 @@ body {
 .node-output-kind.missing { color: var(--sf-warning); background: rgba(181,71,8,0.12); border-color: rgba(181,71,8,0.22); }
 
 .add-next-step-btn {
-    width: 38px; height: 38px; border-radius: 999px; padding: 0;
+    width: 28px; height: 28px; border-radius: 999px; padding: 0;
     display: inline-flex; align-items: center; justify-content: center;
-    font-size: 1.15rem; line-height: 1; font-weight: 700;
+    font-size: 1rem; line-height: 1; font-weight: 700;
 }
 
 .export-box, .source-box {
@@ -206,6 +209,37 @@ body {
     .flow-map-shell { min-height: 420px; }
     .flow-column { grid-template-columns: 1fr; }
 }
+
+/* START node */
+.flow-node.node-start-type {
+    border: 2.5px solid #198754;
+    background: linear-gradient(180deg, #ffffff 0%, #f0fff4 100%);
+}
+.flow-node.node-start-type .flow-node-title strong {
+    color: #146c43;
+}
+
+/* END node */
+.flow-node.node-end-type {
+    border: 2.5px solid #dc3545;
+    background: linear-gradient(180deg, #ffffff 0%, #fff5f5 100%);
+}
+.flow-node.node-end-type .flow-node-title strong {
+    color: #b02a37;
+}
+
+/* Info chips on node cards */
+.node-info-row { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+.node-info-chip {
+    font-size: 0.72rem; color: var(--sf-muted);
+    background: rgba(100,116,139,0.08); border-radius: 999px;
+    padding: 0.1rem 0.45rem; white-space: nowrap;
+}
+.exc-icon { background: none; padding: 0 0.2rem; }
+.exc-break  { color: #dc3545; }
+.exc-ignore { color: #6c757d; }
+.exc-user   { color: #c8a055; }
+.exc-goto   { color: #e07b00; }
 
 /* Back-reference row */
 .node-backref-row {

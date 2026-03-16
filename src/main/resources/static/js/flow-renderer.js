@@ -16,6 +16,18 @@ const FlowRenderer = (function() {
             if (step.uiLevel != null) levelsById[step.id] = step.uiLevel;
         });
 
+        // Force START to level 0, END to maxLevel+1 (unless manually pinned via uiLevel)
+        var startStep = steps.find(function(s) { return s.type === 'START'; });
+        var endStep   = steps.find(function(s) { return s.type === 'END'; });
+        if (startStep && startStep.uiLevel == null) levelsById[startStep.id] = 0;
+        if (endStep && endStep.uiLevel == null) {
+            var currentMax = 0;
+            steps.forEach(function(s) {
+                if (s.type !== 'END' && levelsById[s.id] != null) currentMax = Math.max(currentMax, levelsById[s.id]);
+            });
+            levelsById[endStep.id] = currentMax + 1;
+        }
+
         const missingTargets = {};
 
         steps.forEach(function(step, i) { orderMap[step.id] = i; });
@@ -43,8 +55,11 @@ const FlowRenderer = (function() {
                 connection: step.connection || "",
                 isStart: !incomingCounts[step.id],
                 isEnd: !step.outputs || step.outputs.length === 0,
+                isStartType: step.type === 'START',
+                isEndType: step.type === 'END',
                 missing: false,
                 selected: step.id === selectedStepId,
+                exception: step.exception || { type: 'break', userForm: ['break', 'next'], gotoStep: '' },
                 description: step.connection
                     ? "Connection: " + step.connection + ". Outputs: " + (step.outputs ? step.outputs.length : 0) + "."
                     : "Outputs: " + (step.outputs ? step.outputs.length : 0) + ".",
@@ -112,6 +127,35 @@ const FlowRenderer = (function() {
                 };
             });
 
+        // Add exception-goto lines
+        steps.forEach(function(step) {
+            var ex = step.exception;
+            if (ex && ex.type === 'goto' && ex.gotoStep && getStepById(steps, ex.gotoStep)) {
+                lines.push({
+                    from: step.id, to: ex.gotoStep,
+                    label: 'exception→goto',
+                    conditional: false, missing: false,
+                    outputOrder: -1, sameLevel: false,
+                    exceptionGoto: true
+                });
+            }
+        });
+
+        // Back-ref lines (upward transitions + self-loops)
+        transitions.forEach(function(t) {
+            if (!backEdges.has(t.from + '::' + t.to)) return;
+            if (!getStepById(steps, t.to)) return;
+            lines.push({
+                from: t.from, to: t.to,
+                label: t.condition || 'default',
+                conditional: Boolean(t.condition),
+                missing: false,
+                outputOrder: t.order,
+                sameLevel: false,
+                backRef: true
+            });
+        });
+
         return { levels: levels, lines: lines };
     }
 
@@ -178,8 +222,11 @@ const FlowRenderer = (function() {
     }
 
     function renderFlowLevel(level) {
-        return '<section class="flow-column">' +
-            '<header class="flow-column-header"><strong>' + esc(level.title) + '</strong><span>' + esc(level.subtitle) + '</span></header>' +
+        var hasSingleton = level.nodes.some(function(n) { return n.isStartType || n.isEndType; });
+        return '<section class="flow-column' + (hasSingleton ? ' flow-column-singleton' : '') + '">' +
+            '<header class="flow-column-header"><strong>' + esc(level.title) + '</strong>' +
+            (level.subtitle ? '<span class="ms-2 text-muted fw-normal">' + esc(level.subtitle) + '</span>' : '') +
+            '</header>' +
             (level.nodes.length
                 ? level.nodes.map(renderFlowNode).join("")
                 : '<div class="empty-hint">Уровень пуст.</div>') +
@@ -187,44 +234,70 @@ const FlowRenderer = (function() {
     }
 
     function renderFlowNode(node) {
-        var outputsHtml = '<div class="node-output-list">' +
-            (node.outputs.length
-                ? node.outputs.map(function(o) {
-                    if (o.isBackRef) {
-                        return '<div class="node-output-row node-backref-row">' +
-                            '<div class="node-output-copy">↩ <strong>' + esc(o.to) + '</strong>' +
-                            '<span>' + esc(o.condition || "back reference") + '</span></div>' +
-                            '<button type="button" class="btn btn-sm btn-outline-secondary backref-jump-btn" ' +
-                            'data-target="' + escA(o.to) + '">Jump</button></div>';
-                    }
-                    return '<div class="node-output-row" data-output-anchor="' + escA(node.id + "::" + o.order) + '">' +
-                        '<div class="node-output-copy"><strong>' + esc(o.to) + '</strong><span>' + esc(o.condition || "Fallback / default transition") + '</span></div>' +
-                        '<span class="node-output-kind ' + (o.missing ? "missing" : o.condition ? "conditional" : "fallback") + '">' + esc(o.kindLabel) + '</span></div>';
-                }).join("")
-                : '<div class="node-output-row"><div class="node-output-copy"><strong>No outputs yet</strong><span>Используйте + чтобы быстро добавить следующий шаг.</span></div><span class="node-output-kind fallback">free</span></div>'
-            ) +
-            (node.missing ? "" : '<div class="d-flex justify-content-end"><button type="button" class="btn btn-primary add-next-step-btn" data-action="add-next" data-id="' + escA(node.id) + '" title="Add next step">+</button></div>') +
-            '</div>';
+        // Compact card: only title, type badge, + button for non-END/missing nodes
+        var cls = "flow-node"
+            + (node.selected ? " selected" : "")
+            + (node.isStart ? " start" : "")
+            + (node.isEnd ? " end" : "")
+            + (node.missing ? " missing" : "")
+            + (node.isStartType ? " node-start-type" : "")
+            + (node.isEndType ? " node-end-type" : "");
 
-        var cls = "flow-node" + (node.selected ? " selected" : "") + (node.isStart ? " start" : "") + (node.isEnd ? " end" : "") + (node.missing ? " missing" : "");
+        var displayName = node.isStartType ? '▶ Start' : (node.isEndType ? '⏹ End' : esc(node.name));
+        var typeBadge = node.missing
+            ? '<span class="badge text-bg-warning">Missing</span>'
+            : node.isStartType
+                ? '<span class="badge text-bg-success">START</span>'
+                : node.isEndType
+                    ? '<span class="badge text-bg-danger">END</span>'
+                    : '<span class="badge text-bg-light">' + esc(node.type) + '</span>';
+
+        // Hidden anchors for SVG line positioning
+        var anchorHtml = node.outputs.map(function(o) {
+            if (o.isBackRef) return '';
+            return '<span style="display:none" data-output-anchor="' + escA(node.id + '::' + o.order) + '"></span>';
+        }).join('');
+
+        var infoChips = [];
+        if (node.connection) {
+            infoChips.push('<span class="node-info-chip">🔌 ' + esc(node.connection) + '</span>');
+        }
+        var outCount = node.outputs ? node.outputs.filter(function(o) { return !o.isBackRef; }).length : 0;
+        if (outCount > 0) {
+            infoChips.push('<span class="node-info-chip">' + outCount + ' out</span>');
+        }
+        if (!node.missing && !node.isStartType && !node.isEndType) {
+            var exType = (node.exception && node.exception.type) || 'break';
+            var exIconCls = exType === 'ignore' ? 'bi-skip-forward-fill' : exType === 'user' ? 'bi-person-fill' : exType === 'goto' ? 'bi-arrow-return-left' : 'bi-x-octagon-fill';
+            infoChips.push('<span class="node-info-chip exc-icon exc-' + escA(exType) + '" title="Исключение: ' + escA(exType) + '"><i class="bi ' + exIconCls + '"></i></span>');
+        }
+        var infoRow = infoChips.length ? '<div class="node-info-row">' + infoChips.join('') + '</div>' : '<div></div>';
+
+        var addBtn = (node.missing || node.isEndType)
+            ? (infoChips.length ? '<div class="node-info-row mt-2">' + infoChips.join('') + '</div>' : '')
+            : '<div class="d-flex justify-content-between align-items-center mt-2">' +
+              infoRow +
+              '<button type="button" class="btn btn-primary btn-sm add-next-step-btn" data-action="add-next" data-id="' + escA(node.id) + '" title="Добавить шаг">+</button>' +
+              '</div>';
+
+        var backRefRowsHtml = node.outputs
+            .filter(function(o) { return o.isBackRef; })
+            .map(function(o) {
+                var kindHtml = '<span class="node-output-kind conditional" style="color:#9b59b6;background:rgba(155,89,182,0.10);border-color:rgba(155,89,182,0.22)">'
+                    + (o.condition ? 'when' : 'back') + '</span>';
+                return '<div class="node-output-row node-backref-row">'
+                    + '<div class="node-output-copy"><strong>' + esc(o.to) + '</strong>'
+                    + (o.condition ? '<span> ' + esc(o.condition) + '</span>' : '') + '</div>'
+                    + kindHtml
+                    + '</div>';
+            }).join('');
 
         return '<article class="' + cls + '" data-flow-node="' + escA(node.id) + '" data-step-id="' + escA(node.realStepId || "") + '" data-level="' + escA(node.level == null ? 0 : node.level) + '">' +
-            '<div class="flow-node-title"><div><strong>' + esc(node.name) + '</strong><code>' + esc(node.id) + '</code></div>' +
-            '<div class="d-flex flex-wrap gap-1 justify-content-end">' +
-            (node.isStart ? '<span class="badge text-bg-success">START</span>' : "") +
-            (node.isEnd && !node.missing ? '<span class="badge text-bg-warning">END</span>' : "") +
-            (node.missing ? '<span class="badge text-bg-warning">Missing</span>' : '<span class="badge text-bg-light">' + esc(node.type) + '</span>') +
-            '</div></div>' +
-            '<div class="node-meta">' +
-            (node.missing ? '<span class="badge text-bg-warning">Unknown step reference</span>' : '<span class="badge text-bg-light">' + esc(node.type) + '</span>') +
-            (node.connection ? '<span class="badge text-bg-light">' + esc(node.connection) + '</span>' : '') +
-            '</div>' +
-            '<div class="node-copy">' + esc(node.description) + '</div>' +
-            outputsHtml +
-            (node.missing ? "" : '<div class="mt-3 d-flex flex-wrap gap-2">' +
-                '<button type="button" class="btn btn-sm btn-primary" data-action="edit" data-id="' + escA(node.id) + '">Edit</button>' +
-                '<button type="button" class="btn btn-sm btn-outline-secondary" data-action="duplicate" data-id="' + escA(node.id) + '">Duplicate</button>' +
-                '<button type="button" class="btn btn-sm btn-outline-danger" data-action="delete" data-id="' + escA(node.id) + '">Delete</button></div>') +
+            '<div class="flow-node-title"><div><strong>' + displayName + '</strong><code>' + esc(node.id) + '</code></div>' +
+            '<div class="d-flex flex-wrap gap-1 justify-content-end">' + typeBadge + '</div></div>' +
+            anchorHtml +
+            backRefRowsHtml +
+            addBtn +
             '</article>';
     }
 
@@ -245,9 +318,11 @@ const FlowRenderer = (function() {
         // Define arrowhead markers (one per stroke colour)
         var defs =
             '<defs>' +
-            '<marker id="arr-default" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#94a3b8"/></marker>' +
+            '<marker id="arr-default" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#198754"/></marker>' +
             '<marker id="arr-conditional" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#0b7285"/></marker>' +
             '<marker id="arr-missing" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#b54708"/></marker>' +
+            '<marker id="arr-exc-goto" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#e07b00"/></marker>' +
+            '<marker id="arr-backref" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#9b59b6"/></marker>' +
             '</defs>';
 
         var parts = [defs];
@@ -259,11 +334,37 @@ const FlowRenderer = (function() {
             var fromNodeRect = fromNode.getBoundingClientRect();
             var toRect = toNode.getBoundingClientRect();
 
-            var stroke = line.missing ? "#b54708" : line.conditional ? "#0b7285" : "#94a3b8";
-            var dash = line.conditional ? "" : ' stroke-dasharray="7 6"';
+            var stroke = line.backRef ? "#9b59b6" : line.exceptionGoto ? "#e07b00" : line.missing ? "#b54708" : line.conditional ? "#0b7285" : "#198754";
+            var dash = line.backRef ? 'stroke-dasharray="5,4"' : line.exceptionGoto ? 'stroke-dasharray="6,4"' : "";
             var sx, sy, ex, ey, path, lx, ly;
 
-            if (line.sameLevel) {
+            if (line.backRef) {
+                var toRect2 = toNode.getBoundingClientRect();
+                sx = fromNodeRect.right - innerRect.left - 5;
+                sy = fromNodeRect.top   - innerRect.top  + fromNodeRect.height / 2;
+                ex = toRect2.right - innerRect.left - 5;
+                ey = toRect2.top   - innerRect.top  + toRect2.height / 2;
+                var bulge = Math.max(60, Math.abs(sy - ey) / 3);
+                path = "M " + sx + " " + sy
+                     + " C " + (sx + bulge) + " " + sy
+                     + " " + (ex + bulge) + " " + ey
+                     + " " + ex + " " + ey;
+                lx = Math.max(sx, ex) + bulge / 2 + 4;
+                ly = (sy + ey) / 2;
+            } else if (line.exceptionGoto) {
+                // Exception→goto: exit left side of from-card, loop left, enter left side of to-card
+                sx = fromNodeRect.left - innerRect.left + 5;
+                sy = fromNodeRect.top  - innerRect.top  + fromNodeRect.height / 2;
+                ex = toRect.left - innerRect.left + 5;
+                ey = toRect.top  - innerRect.top  + toRect.height / 2;
+                var excBulge = Math.max(60, Math.abs(sy - ey) / 3);
+                path = "M " + sx + " " + sy
+                     + " C " + (sx - excBulge) + " " + sy
+                     + " " + (ex - excBulge) + " " + ey
+                     + " " + ex + " " + ey;
+                lx = Math.min(sx, ex) - excBulge / 2 - 4;
+                ly = (sy + ey) / 2;
+            } else if (line.sameLevel) {
                 // Same-level edge: right side of from-card → left side of to-card (horizontal curve)
                 sx = fromNodeRect.right - innerRect.left;
                 sy = fromNodeRect.top - innerRect.top + fromNodeRect.height / 2;
@@ -294,10 +395,10 @@ const FlowRenderer = (function() {
                 ly = sy + Math.max(26, (ey - sy) / 2);
             }
 
-            var markerId = line.missing ? 'arr-missing' : line.conditional ? 'arr-conditional' : 'arr-default';
+            var markerId = line.backRef ? 'arr-backref' : line.exceptionGoto ? 'arr-exc-goto' : line.missing ? 'arr-missing' : line.conditional ? 'arr-conditional' : 'arr-default';
             parts.push('<path d="' + path + '" fill="none" stroke="' + stroke + '" stroke-width="2.5" stroke-linecap="round"' + (dash ? ' ' + dash : '') + ' marker-end="url(#' + markerId + ')"/>');
             parts.push('<text x="' + lx + '" y="' + ly + '" class="line-label">' + esc(shorten(line.label, 34)) + '</text>');
-            parts.push('<circle cx="' + sx + '" cy="' + sy + '" r="3" fill="' + stroke + '"/>');
+            parts.push('<g class="line-tooltip-group" style="pointer-events:all;cursor:pointer"><circle cx="' + sx + '" cy="' + sy + '" r="6" fill="' + stroke + '" opacity="0.85"/><title>' + esc(line.label) + '</title></g>');
         });
 
         flowMapLinesSvg.innerHTML = parts.join("");

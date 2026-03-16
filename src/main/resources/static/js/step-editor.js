@@ -41,7 +41,7 @@ const StepEditor = (function() {
 
         var typeOptions = '';
         // Build type options from known types
-        var knownTypes = ["ORACLE_PLSQL", "HTTP", "EMAIL", "EMPTY"];
+        var knownTypes = ["START", "END", "ORACLE_PLSQL", "HTTP", "EMAIL", "EMPTY"];
         knownTypes.forEach(function(t) {
             typeOptions += '<option value="' + esc(t) + '"' + (t === step.type ? ' selected' : '') + '>' + esc(t) + '</option>';
         });
@@ -86,8 +86,10 @@ const StepEditor = (function() {
         // Connection field visibility
         var showConnection = typeDescriptor ? typeDescriptor.requiresConnection : true;
         var showRetry = typeDescriptor ? typeDescriptor.supportsRetry : true;
+        var isStartOrEnd = (step.type === 'START' || step.type === 'END');
+        var isEnd = step.type === 'END';
 
-        // Type hints
+        // Type hints (kept for internal use but not rendered as section)
         var hintsHtml = '';
         if (typeDescriptor && typeDescriptor.hints && typeDescriptor.hints.length) {
             hintsHtml = typeDescriptor.hints.map(function(h) {
@@ -113,29 +115,97 @@ const StepEditor = (function() {
             startsAfterHtml +
             '</div></section>' +
 
-            // Config section
-            '<section class="editor-section">' +
-            '<div class="d-flex flex-wrap justify-content-between align-items-start gap-2">' +
-            '<div><h3>Config</h3><p>' + configHint + '</p></div>' +
-            '<button type="button" class="btn btn-sm btn-outline-secondary" id="add-config-row-btn">Добавить поле</button>' +
-            '</div>' +
-            dynamicFieldsHtml +
-            (extraRows.length ? renderExtraConfigTable(extraRows) : '<table class="editor-table"><thead><tr><th>Key</th><th>Value</th><th></th></tr></thead><tbody id="config-rows-body"></tbody></table>') +
-            '</section>' +
+            // Config section (hidden for START/END)
+            (!isStartOrEnd ?
+                '<section class="editor-section">' +
+                '<div class="d-flex flex-wrap justify-content-between align-items-start gap-2">' +
+                '<div><h3>Config</h3><p>' + configHint + '</p></div>' +
+                '<button type="button" class="btn btn-sm btn-outline-secondary" id="add-config-row-btn">Добавить поле</button>' +
+                '</div>' +
+                dynamicFieldsHtml +
+                (extraRows.length ? renderExtraConfigTable(extraRows) : '<table class="editor-table"><thead><tr><th>Key</th><th>Value</th><th></th></tr></thead><tbody id="config-rows-body"></tbody></table>') +
+                '</section>'
+            : '') +
 
-            // Outputs section
-            '<section class="editor-section">' +
-            '<div class="d-flex flex-wrap justify-content-between align-items-start gap-2">' +
-            '<div><h3>Outputs</h3><p>Условный переход задается через <code>condition</code>. Пустое условие — fallback.</p></div>' +
-            '<button type="button" class="btn btn-sm btn-outline-secondary" id="add-output-row-btn">Add output</button>' +
-            '</div>' +
-            renderOutputTable(outputRows, allSteps) +
-            '</section>' +
+            // Outputs section (hidden for END)
+            (!isEnd ?
+                '<section class="editor-section">' +
+                '<div class="d-flex flex-wrap justify-content-between align-items-start gap-2">' +
+                '<div><h3>Outputs</h3><p>Условный переход задается через <code>condition</code>. Пустое условие — fallback.</p></div>' +
+                '<button type="button" class="btn btn-sm btn-outline-secondary" id="add-output-row-btn">Add output</button>' +
+                '</div>' +
+                renderOutputTable(outputRows, allSteps) +
+                '</section>'
+            : '') +
 
-            // Type hints
-            (hintsHtml ? '<section class="editor-section"><h3>Type hints</h3><p>Подсказки для выбранного типа.</p><div class="notes-stack">' + hintsHtml + '</div></section>' : '') +
+            // Exception section (hidden for START/END)
+            (!isStartOrEnd ? renderExceptionSection(step, allSteps) : '') +
+
+            // Delete / Duplicate actions (hidden for START/END and new steps)
+            (draft.originalId && !isStartOrEnd ?
+                '<div class="d-flex gap-2 mt-1">' +
+                '<button type="button" class="btn btn-outline-secondary btn-sm" id="duplicate-step-modal-btn">Копировать</button>' +
+                '<button type="button" class="btn btn-outline-danger btn-sm" id="delete-step-modal-btn">Удалить</button>' +
+                '</div>'
+            : '') +
+
             '</div>'
         );
+
+        if (isStartOrEnd) {
+            $('#step-id-input').prop('readonly', true);
+            $('#step-type-input').prop('disabled', true);
+        }
+
+        if (!isStartOrEnd) {
+            bindExceptionToggle($body);
+        }
+    }
+
+    function renderExceptionSection(step, allSteps) {
+        var ex = step.exception || { type: 'break', userForm: ['break', 'next'], gotoStep: '' };
+        var excTypeOptions = [
+            { val: 'break',  label: '1. Прерывание всего процесса' },
+            { val: 'ignore', label: '2. Игнорирование (следующий шаг)' },
+            { val: 'user',   label: '3. Запрос пользователя' },
+            { val: 'goto',   label: '4. Переход на шаг' }
+        ].map(function(o) {
+            return '<option value="' + esc(o.val) + '"' + (ex.type === o.val ? ' selected' : '') + '>' + esc(o.label) + '</option>';
+        }).join('');
+
+        var userBreakChecked = (ex.userForm || []).indexOf('break') >= 0 ? ' checked' : '';
+        var userNextChecked  = (ex.userForm || []).indexOf('next')  >= 0 ? ' checked' : '';
+
+        var stepOpts = (allSteps || []).map(function(s) {
+            return '<option value="' + esc(s.id) + '">' + esc(s.name || s.id) + '</option>';
+        }).join('');
+
+        return '<section class="editor-section" id="exception-section">' +
+            '<h3>Обработка исключений</h3>' +
+            '<p>Реакция процесса при ошибке выполнения шага.</p>' +
+            '<div class="mb-2"><label class="form-label" for="exc-type">Тип реакции</label>' +
+            '<select class="form-select" id="exc-type">' + excTypeOptions + '</select></div>' +
+            '<div id="exc-user-opts" class="mb-2">' +
+            '<label class="form-label">Варианты для пользователя</label>' +
+            '<div class="form-check"><input class="form-check-input" type="checkbox" id="exc-user-break"' + userBreakChecked + '>' +
+            '<label class="form-check-label" for="exc-user-break">Прервать процесс</label></div>' +
+            '<div class="form-check"><input class="form-check-input" type="checkbox" id="exc-user-next"' + userNextChecked + '>' +
+            '<label class="form-check-label" for="exc-user-next">Продолжить</label></div></div>' +
+            '<div id="exc-goto-wrap" class="mb-2">' +
+            '<label class="form-label" for="exc-goto">Шаг для перехода</label>' +
+            '<input class="form-control" id="exc-goto" list="exc-goto-list" value="' + esc(ex.gotoStep) + '" placeholder="step_id">' +
+            '<datalist id="exc-goto-list">' + stepOpts + '</datalist></div>' +
+            '</section>';
+    }
+
+    function bindExceptionToggle($body) {
+        function update() {
+            var t = $body.find('#exc-type').val();
+            $body.find('#exc-user-opts').toggle(t === 'user');
+            $body.find('#exc-goto-wrap').toggle(t === 'goto');
+        }
+        $body.find('#exc-type').on('change', update);
+        update();
     }
 
     function renderDynamicField(field, value) {
@@ -257,6 +327,16 @@ const StepEditor = (function() {
                 condition: $row.find('.output-condition').val() || ''
             });
         });
+
+        var excType = $body.find('#exc-type').val() || 'break';
+        var excUserForm = [];
+        if ($body.find('#exc-user-break').prop('checked')) excUserForm.push('break');
+        if ($body.find('#exc-user-next').prop('checked')) excUserForm.push('next');
+        draft.step.exception = {
+            type: excType,
+            userForm: excType === 'user' ? excUserForm : ['break', 'next'],
+            gotoStep: excType === 'goto' ? $body.find('#exc-goto').val().trim() : ''
+        };
     }
 
     function inputField(label, id, value, type, placeholder) {

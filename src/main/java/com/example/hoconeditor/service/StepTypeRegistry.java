@@ -84,6 +84,24 @@ public class StepTypeRegistry {
                 List.of(),
                 List.of("Используйте EMPTY как placeholder или маршрутный узел для ветвлений")
         ));
+
+        register(new StepTypeDescriptor(
+                "START",
+                "Начало процесса",
+                "Точка входа в процесс. Singleton — ровно один на флоу. Нельзя удалить.",
+                false, false,
+                List.of(),
+                List.of("START — singleton. Всегда ровно один в процессе.", "Нет config, connection, retry. Допустимы исходящие переходы.")
+        ));
+
+        register(new StepTypeDescriptor(
+                "END",
+                "Конец процесса",
+                "Точка выхода из процесса. Singleton — ровно один на флоу. Нельзя удалить.",
+                false, false,
+                List.of(),
+                List.of("END — singleton. Всегда ровно один в процессе.", "Нет config, connection, retry, outputs.")
+        ));
     }
 
     private void register(StepTypeDescriptor desc) {

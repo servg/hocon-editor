@@ -71,6 +71,19 @@ const HoconSerializer = (function() {
             if (Number(step.maxRetries) > 0) lines.push("    max-retries = " + Number(step.maxRetries));
             if (Number(step.retryDelayMs) > 0) lines.push("    retry-delay-ms = " + Number(step.retryDelayMs));
 
+            var ex = step.exception || { type: 'break', userForm: ['break', 'next'], gotoStep: '' };
+            lines.push('    exception {');
+            lines.push('        type = ' + ex.type);
+            if (ex.type === 'user' && ex.userForm && ex.userForm.length) {
+                lines.push('        user-form = [' + ex.userForm.join(', ') + ']');
+            }
+            if (ex.type === 'goto' && ex.gotoStep) {
+                lines.push('        output {');
+                lines.push('            to = ' + ex.gotoStep);
+                lines.push('        }');
+            }
+            lines.push('    }');
+
             if (step.outputs && step.outputs.length) {
                 lines.push("    outputs = [");
                 step.outputs
