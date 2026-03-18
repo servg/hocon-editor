@@ -8,9 +8,21 @@ const HoconParser = (function() {
         const sanitized = stripComments(text);
 
         let variables = [];
+
+        // Parse input-params {} → varClass = "user"
+        try {
+            const inputParamsBlock = extractNamedBlock(sanitized, "input-params");
+            const inputVars = parseVariablesBlock(inputParamsBlock.content, "user");
+            variables = variables.concat(inputVars);
+        } catch (e) {
+            // input-params block is optional
+        }
+
+        // Parse variables {} → varClass = "system"
         try {
             const varsBlock = extractNamedBlock(sanitized, "variables");
-            variables = parseVariablesBlock(varsBlock.content);
+            const sysVars = parseVariablesBlock(varsBlock.content, "system");
+            variables = variables.concat(sysVars);
         } catch (e) {
             // variables block is optional
         }
@@ -105,7 +117,8 @@ const HoconParser = (function() {
         throw new Error("Unclosed block starting at index " + startIndex);
     }
 
-    function parseVariablesBlock(content) {
+    function parseVariablesBlock(content, varClass) {
+        const cls = varClass || "user";
         const variables = [];
         let index = 0;
 
@@ -120,12 +133,16 @@ const HoconParser = (function() {
             if (content[index] === "{") {
                 const block = readBalanced(content, index, "{", "}");
                 const varObj = parseObjectAssignments(block.content);
+                // input-params uses "require", variables uses "required"
+                const isRequired = getVal(varObj.values.required, null) === "true" ||
+                                   getVal(varObj.values.require, null) === "true";
                 variables.push({
                     name: keyToken.value,
+                    varClass: cls,
                     type: getVal(varObj.values.type, "string"),
-                    value: getVal(varObj.values.value, ""),
+                    value: getVal(varObj.values.value, "") || getVal(varObj.values["default"], ""),
                     description: getVal(varObj.values.description, ""),
-                    required: getVal(varObj.values.required, "false") === "true",
+                    required: isRequired,
                     constraint: varObj.blocks.constraint
                         ? parseConstraintBlock(varObj.blocks.constraint)
                         : null
@@ -136,6 +153,7 @@ const HoconParser = (function() {
                 const val = readValue(content, index + 1);
                 variables.push({
                     name: keyToken.value,
+                    varClass: cls,
                     type: "string",
                     value: val.value,
                     description: "",

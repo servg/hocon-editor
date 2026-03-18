@@ -196,7 +196,7 @@ $(function() {
     });
     $('#add-variable-btn').on('click', function() {
         state.processDraft.variables = VariablesEditor.readVariablesFromDom($variablesContainer);
-        state.processDraft.variables.push({ name: '', type: 'string', value: '', description: '', required: false, constraint: null });
+        state.processDraft.variables.push({ name: '', varClass: 'user', type: 'string', value: '', description: '', required: false, constraint: null });
         VariablesEditor.renderVariablesTable($variablesContainer, state.processDraft.variables);
     });
 

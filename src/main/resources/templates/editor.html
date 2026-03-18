@@ -87,7 +87,7 @@
         <div class="panel-header">
             <div>
                 <h2>Стартовые переменные</h2>
-                <p>Переменные процесса, сохраняются в блоке <code>variables {}</code>.</p>
+                <p>Переменные процесса: <code>user</code>/<code>user_additional</code> → блок <code>input-params {}</code>, <code>system</code> → блок <code>variables {}</code>.</p>
             </div>
             <button class="btn btn-sm btn-outline-secondary" id="add-variable-btn" type="button">Добавить переменную</button>
         </div>
@@ -133,7 +133,7 @@
                 <div class="panel-header">
                     <div>
                         <h2>Exported HOCON</h2>
-                        <p>Сериализация текущего draft: <code>variables</code> + <code>steps</code>.</p>
+                        <p>Сериализация текущего draft: <code>input-params</code> + <code>variables</code> + <code>steps</code>.</p>
                     </div>
                     <button class="btn btn-sm btn-outline-secondary" id="copy-output-to-source-btn" type="button">Copy to Source</button>
                 </div>

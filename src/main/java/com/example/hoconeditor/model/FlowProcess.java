@@ -9,6 +9,7 @@ public record FlowProcess(
 ) {
     public record Variable(
             String name,
+            String varClass,
             String type,
             Object value,
             String description,

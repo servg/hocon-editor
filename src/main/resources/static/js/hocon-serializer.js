@@ -7,10 +7,48 @@ const HoconSerializer = (function() {
     function serializeHocon(draft) {
         const lines = [];
 
-        // Variables block
-        if (draft.variables && draft.variables.length) {
+        // input-params block (user + user_additional)
+        var inputParams = (draft.variables || []).filter(function(v) {
+            return !v.varClass || v.varClass === 'user' || v.varClass === 'user_additional';
+        });
+        if (inputParams.length) {
+            lines.push("input-params {");
+            inputParams.forEach(function(v) {
+                lines.push("");
+                lines.push("  " + v.name + " {");
+                lines.push("    type: " + q(v.type || "string"));
+                if (v.varClass === 'user_additional') {
+                    lines.push("    class: " + q("user_additional"));
+                }
+                if (v.value !== undefined && v.value !== "") {
+                    lines.push("    default: " + formatConfigValue(v.value));
+                }
+                if (v.description) {
+                    lines.push("    description: " + q(v.description));
+                }
+                if (v.required) {
+                    lines.push("    require: true");
+                }
+                if (v.constraint && Object.keys(v.constraint).length) {
+                    lines.push("    constraint {");
+                    Object.entries(v.constraint).forEach(function(e) {
+                        lines.push("      " + e[0] + ": " + q(e[1]));
+                    });
+                    lines.push("    }");
+                }
+                lines.push("  }");
+            });
+            lines.push("}");
+            lines.push("");
+        }
+
+        // variables block (system)
+        var sysVars = (draft.variables || []).filter(function(v) {
+            return v.varClass === 'system';
+        });
+        if (sysVars.length) {
             lines.push("variables {");
-            draft.variables.forEach(function(v) {
+            sysVars.forEach(function(v) {
                 lines.push("");
                 lines.push("  " + v.name + " {");
                 lines.push("    type: " + q(v.type || "string"));
@@ -19,16 +57,6 @@ const HoconSerializer = (function() {
                 }
                 if (v.description) {
                     lines.push("    description: " + q(v.description));
-                }
-                if (v.required) {
-                    lines.push("    required: true");
-                }
-                if (v.constraint && Object.keys(v.constraint).length) {
-                    lines.push("    constraint {");
-                    Object.entries(v.constraint).forEach(function(e) {
-                        lines.push("      " + e[0] + ": " + q(e[1]));
-                    });
-                    lines.push("    }");
                 }
                 lines.push("  }");
             });
